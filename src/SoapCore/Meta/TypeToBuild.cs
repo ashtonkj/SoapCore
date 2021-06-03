@@ -12,9 +12,16 @@ namespace SoapCore.Meta
 			TypeName = type.GetSerializedTypeName();
 			ChildElementName = null;
 			IsAnonumous = type.GetCustomAttribute<XmlTypeAttribute>()?.AnonymousType == true;
+			IncludeInheritedProperties = true;
+		}
+
+		public TypeToBuild(Type type, bool includeInheritedProperties) : this(type)
+		{
+			IncludeInheritedProperties = includeInheritedProperties;
 		}
 
 		public bool IsAnonumous { get; }
+		public bool IncludeInheritedProperties { get;  }
 		public Type Type { get; }
 		public string TypeName { get; set; }
 		public string ChildElementName { get; set; }

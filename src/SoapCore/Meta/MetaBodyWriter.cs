@@ -306,13 +306,37 @@ namespace SoapCore.Meta
 			}
 		}
 
-		private void AddTypes(XmlDictionaryWriter writer)
+		private Type[] GetAllTypes()
 		{
-			var serviceKnownTypes = _service.ServiceKnownTypes.Select(c => new TypeToBuild(c.Type));
-			foreach (var ty in serviceKnownTypes)
+			var assemblyPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+			var dlls = Directory.GetFiles(assemblyPath, "*.dll");
+			var types = dlls.SelectMany(c => Assembly.LoadFrom(c).GetTypes()).ToArray();
+			return types;
+		}
+
+		private IEnumerable<TypeToBuild> GetTypesToBuild(Type ty, IEnumerable<Type> allTypes)
+		{
+			var result = new List<TypeToBuild>();
+			var derivedTypes = allTypes.Where(c => ty.IsAssignableFrom(c) && c.Name != ty.Name).Select(c => new TypeToBuild(c, false));
+			result.AddRange(derivedTypes);
+			result.Add(new TypeToBuild(ty));
+			return result;
+
+		}
+
+		private void HandleServiceKnownTypes()
+		{
+			var allTypes = GetAllTypes();
+			var typesToBuild = _service.ServiceKnownTypes.SelectMany(c => GetTypesToBuild(c.Type, allTypes));
+			foreach (var ty in typesToBuild)
 			{
 				_complexTypeToBuild.Enqueue(ty);
 			}
+		}
+
+		private void AddTypes(XmlDictionaryWriter writer)
+		{
+			HandleServiceKnownTypes();
 
 			writer.WriteStartElement("wsdl", "types", Namespaces.WSDL_NS);
 			writer.WriteStartElement("schema", Namespaces.XMLNS_XSD);
@@ -391,6 +415,8 @@ namespace SoapCore.Meta
 						AddSchemaType(writer, returnType, returnName);
 						writer.WriteEndElement();
 						writer.WriteEndElement();
+						_builtComplexTypes.Add(returnName);
+						//_builtComplexTypes.Add(returnType.Name);
 					}
 					else
 					{
@@ -686,12 +712,18 @@ namespace SoapCore.Meta
 			writer.WriteEndElement(); // wsdl:port
 		}
 
+		private List<PropertyInfo> GetProperties(Type ty, bool includeInherited)
+		{
+			var bindingFlags = includeInherited ? BindingFlags.Public | BindingFlags.Instance : BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+			return ty.GetProperties(bindingFlags).Where(prop => !prop.IsIgnored())
+					.ToList();
+		}
+
 		private void WriteSequence(bool isWrappedBodyType, Type toBuildBodyType, XmlDictionaryWriter writer, TypeToBuild toBuild, Type toBuildType)
 		{
 			if (!isWrappedBodyType)
 			{
-				var properties = toBuildBodyType.GetProperties().Where(prop => !prop.IsIgnored())
-					.ToList();
+				var properties = GetProperties(toBuildBodyType, toBuild.IncludeInheritedProperties);
 
 				var elements = properties.Where(t => !t.IsAttribute()).ToList();
 				if (elements.Any())
@@ -713,8 +745,7 @@ namespace SoapCore.Meta
 			}
 			else
 			{
-				var properties = toBuildType.GetProperties().Where(prop => !prop.IsIgnored())
-					.ToList();
+				var properties = GetProperties(toBuildBodyType, toBuild.IncludeInheritedProperties);
 
 				var elements = properties.Where(t => !t.IsAttribute()).ToList();
 				if (elements.Any())
